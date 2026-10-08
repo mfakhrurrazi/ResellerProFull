@@ -128,6 +128,7 @@ const TAMPILAN_BODY_ = String.raw`
 const TAMPILAN_JS_ = String.raw`
 var S={token:'',user:null,biz:{name:'Toko Saya',logo:''},lic:{},set:{},products:[],page:'',charts:[],app:{version:'1.0.0'},supportWa:''};
 var A={},IN={},FM={},R={};
+S.access={enabled:false,role:'Owner',readonly:false};
 var $=function(s,r){return (r||document).querySelector(s)};
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function rp(n){return 'Rp '+String(Math.round(Number(n)||0)).replace(/\B(?=(\d{3})+(?!\d))/g,'.')}
@@ -157,6 +158,7 @@ function opts(list,sel){return list.map(function(x){return '<option'+(x===sel?' 
 var ST=['Baru','Diproses','Dikemas','Dikirim','Selesai','Retur'],PAY=['Belum Bayar','DP','Lunas'],CR=['JNE','J&T','SiCepat','AnterAja','Pos','Kurir Lokal'],MT=['Transfer','QRIS','COD'];
 var NEXT={Baru:'Diproses',Diproses:'Dikemas',Dikemas:'Dikirim',Dikirim:'Selesai'};
 function isOwner(){return S.user&&S.user.role==='Owner'}
+function isPub(){return !!(S.user&&S.user.public)}
 function aiBadge(src){return src==='ai'?'<span class="ai-b">✨ Dibantu AI</span>':'<span class="ai-b ai-off">AI tidak aktif</span>'}
 
 /* ---------- navigasi ---------- */
@@ -176,7 +178,7 @@ function chrome(){
   $('#fVer').textContent=S.app.version;$('#fLic').textContent=S.lic.label||'—';
   var wa=String(S.supportWa||'').replace(/\D/g,'');$('#fWa').href='https://wa.me/'+wa+'?text='+encodeURIComponent('Halo support ResellerPro');
   var loggedIn=!!S.user;$('#userBtn').classList.toggle('hidden',!loggedIn);$('#side').classList.toggle('hidden',!loggedIn);$('#bnav').classList.toggle('hidden',!loggedIn);
-  if(loggedIn){$('#userBtn').innerHTML='👤<span class="un"> '+esc(S.user.name)+'</span>';buildNav()}}
+  if(loggedIn){$('#userBtn').innerHTML=(isPub()?'🌐':'👤')+'<span class="un"> '+esc(S.user.name)+'</span>';buildNav()}}
 function go(p,arg){
   if(!S.user&&!PUBLIC[p])p='login';
   if(S.user&&OWNER_ONLY[p]&&!isOwner()){toast('Fitur ini hanya untuk Owner','err');p='dashboard'}
@@ -186,14 +188,17 @@ function go(p,arg){
   var s=$('#sn-'+p),b=$('#bn-'+p);if(s)s.classList.add('on');if(b)b.classList.add('on');
   window.scrollTo(0,0);R[p]($('#view'),arg)}
 function forceLogout(){S.token='';S.user=null;store.del('rp_tok');chrome();toast('Sesi berakhir, silakan login lagi','err');go('login')}
-A.userMenu=function(){modal(S.user.name,'<p><span class="chip v">'+esc(S.user.role)+'</span> @'+esc(S.user.username)+'</p><div class="grid"><button class="btn" data-act="chpw">🔒 Ganti Password</button><button class="btn" data-act="go" data-p="license">🔑 Lisensi</button><button class="btn dng" data-act="logout">🚪 Keluar</button></div>')};
-A.logout=function(){closeModal();call('logout').catch(function(){}).then(function(){S.token='';S.user=null;store.del('rp_tok');chrome();go('login')})};
+A.userMenu=function(){if(isPub())return modal('Mode Publik','<p><span class="chip v">'+esc(S.user.role)+'</span> '+(S.access.readonly?'<span class="chip p">hanya-baca</span>':'<span class="chip">baca &amp; ubah</span>')+'</p><p style="color:var(--mu)">Siapa pun yang punya link bisa memakai aplikasi ini tanpa login. Ingin memakai akun sendiri?</p><div class="grid"><button class="btn pri" data-act="pubLogin">🔑 Masuk dengan akun</button><button class="btn" data-act="go" data-p="license">Lisensi</button></div>');
+  modal(S.user.name,'<p><span class="chip v">'+esc(S.user.role)+'</span> @'+esc(S.user.username)+'</p><div class="grid"><button class="btn" data-act="chpw">🔒 Ganti Password</button><button class="btn" data-act="go" data-p="license">🔑 Lisensi</button><button class="btn dng" data-act="logout">🚪 Keluar</button></div>')};
+A.pubLogin=function(){closeModal();S.token='';S.user=null;S.showLogin=true;chrome();go('login')};
+A.logout=function(){closeModal();call('logout').catch(function(){}).then(function(){S.token='';S.user=null;store.del('rp_tok');chrome();if(S.access.enabled){S.showLogin=false;afterLogin().catch(fail)}else go('login')})};
 A.chpw=function(){modal('Ganti Password','<form data-form="chpw"><label>Password lama</label><input type="password" name="old_password" required autocomplete="current-password"><label>Password baru (min. 8 karakter)</label><input type="password" name="new_password" minlength="8" required autocomplete="new-password"><div class="row" style="margin-top:12px"><button class="btn pri">Simpan</button><button type="button" class="btn" data-act="closeModal">Batal</button></div></form>')};
 A.closeModal=closeModal;
 FM.chpw=function(f){call('changePassword',fv(f)).then(function(){closeModal();toast('Password diubah','ok')}).catch(fail)};
 
 /* ---------- login ---------- */
-R.login=function(){view('<div class="card login"><div class="empty" style="padding:6px">'+empty('').replace('<p></p>','')+'</div><h2 style="text-align:center;margin:0">Masuk ke ResellerPro</h2><p style="text-align:center;color:var(--mu)">Ubah chat WhatsApp jadi pesanan & pengiriman.</p><form data-form="login"><label>Username</label><input name="username" autocomplete="username" required maxlength="40"><label>Password</label><input type="password" name="password" autocomplete="current-password" required><button class="btn pri" style="width:100%;margin-top:14px">Masuk</button></form>'+(S.needSetup?'<p class="chip p" style="margin-top:12px">Database belum siap — jalankan setupDatabase() di editor Apps Script.</p>':'')+'</div>')};
+R.login=function(){view('<div class="card login"><div class="empty" style="padding:6px">'+empty('').replace('<p></p>','')+'</div><h2 style="text-align:center;margin:0">Masuk ke ResellerPro</h2><p style="text-align:center;color:var(--mu)">Ubah chat WhatsApp jadi pesanan & pengiriman.</p><form data-form="login"><label>Username</label><input name="username" autocomplete="username" required maxlength="40"><label>Password</label><input type="password" name="password" autocomplete="current-password" required><button class="btn pri" style="width:100%;margin-top:14px">Masuk</button></form>'+(S.access.enabled?'<p style="text-align:center"><button type="button" class="btn" data-act="pubBack">🌐 Lanjut tanpa login</button></p>':'')+(S.needSetup?'<p class="chip p" style="margin-top:12px">Database belum siap — jalankan setupDatabase() di editor Apps Script.</p>':'')+'</div>')};
+A.pubBack=function(){S.showLogin=false;afterLogin().catch(fail)};
 FM.login=function(f){call('login',fv(f)).then(function(d){S.token=d.token;S.user=d.user;store.set('rp_tok',d.token);return afterLogin()}).catch(fail)};
 function afterLogin(){
   return call('me').then(function(d){S.user=d.user;S.set=d.settings;S.lic=d.license;S.biz={name:S.set.BUSINESS_NAME||S.biz.name,logo:S.set.LOGO_URL||''};chrome();return call('products.list',{},true)})
@@ -205,7 +210,7 @@ function afterLogin(){
 var WZ=1;
 R.wizard=function(){
   var s=S.set,st={1:'<h3>1. Profil Bisnis</h3><label>Nama bisnis</label><input name="BUSINESS_NAME" value="{BUSINESS_NAME}" maxlength="80"><label>URL logo (opsional)</label><input name="LOGO_URL" value="{LOGO_URL}"><label>WhatsApp toko (628…)</label><input name="WHATSAPP" value="{WHATSAPP}"><label>Nama pengirim di label</label><input name="SENDER_NAME" value="{SENDER_NAME}"><label>HP pengirim</label><input name="SENDER_PHONE" value="{SENDER_PHONE}"><label>Alamat pengirim</label><textarea name="SENDER_ADDRESS" rows="2">{SENDER_ADDRESS}</textarea>',
-   2:'<h3>2. Keamanan</h3><p>Ganti password bawaan (admin123) sekarang.</p><label>Password saat ini</label><input type="password" name="old_password" value="admin123"><label>Password baru (min. 8 karakter)</label><input type="password" name="new_password" minlength="8">',
+   2:isPub()?'<h3>2. Keamanan</h3><p>Mode publik aktif: aplikasi terbuka untuk siapa pun yang punya link, jadi tidak ada password. Atur <b>PUBLIC_ACCESS</b>, <b>PUBLIC_ROLE</b>, dan <b>PUBLIC_READONLY</b> di Script Properties bila ingin membatasi.</p>':'<h3>2. Keamanan</h3><p>Ganti password bawaan (admin123) sekarang.</p><label>Password saat ini</label><input type="password" name="old_password" value="admin123"><label>Password baru (min. 8 karakter)</label><input type="password" name="new_password" minlength="8">',
    3:'<h3>3. Data & AI</h3><label><input type="checkbox" name="AI_ENABLED" '+(s.AI_ENABLED?'checked':'')+'> Aktifkan fitur AI (opsional — aplikasi tetap jalan tanpa AI)</label><label>Data contoh</label><select name="demo"><option value="keep">Pakai data demo dulu</option><option value="reset">Kosongkan semua data demo (mulai bersih)</option></select>'};
   view('<div class="pg-h"><h1>🚀 Setup Awal</h1><p>Langkah '+WZ+' dari 3</p></div><div class="card"><form data-form="wizard"><div id="wzb">'+T(st[WZ],s)+'</div><div class="row" style="margin-top:14px">'+(WZ>1?'<button type="button" class="btn" data-act="wzBack">‹ Kembali</button>':'')+'<span class="sp"></span><button class="btn pri">'+(WZ<3?'Lanjut ›':'Selesai ✓')+'</button></div></form></div>')};
 A.wzBack=function(){WZ--;R.wizard()};
@@ -433,7 +438,10 @@ document.addEventListener('input',onIn);document.addEventListener('change',onIn)
 document.addEventListener('submit',function(e){var f=e.target;if(f.dataset&&f.dataset.form&&FM[f.dataset.form]){e.preventDefault();FM[f.dataset.form](f)}});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal()});
 (function boot(){
-  call('bootstrap',{},true).then(function(b){S.app=b.app;S.supportWa=b.supportWa;S.biz=b.business;S.lic=b.license;S.needSetup=!!b.needSetup;chrome();
-    var t=store.get('rp_tok');if(t&&!b.needSetup){S.token=t;return afterLogin().catch(function(){S.token='';S.user=null;store.del('rp_tok');chrome();go(INIT.page&&PUBLIC[INIT.page]?INIT.page:'login')})}
-    go(INIT.page&&PUBLIC[INIT.page]?INIT.page:'login')}).catch(function(e){view('<div class="card">'+empty('Gagal memuat aplikasi: '+e.message)+'</div>')})})();
+  call('bootstrap',{},true).then(function(b){S.app=b.app;S.supportWa=b.supportWa;S.biz=b.business;S.lic=b.license;S.needSetup=!!b.needSetup;S.access=b.access||S.access;chrome();
+    var t=store.get('rp_tok'),toLogin=function(){S.token='';S.user=null;store.del('rp_tok');chrome();go(INIT.page&&PUBLIC[INIT.page]?INIT.page:'login')};
+    if(b.needSetup)return toLogin();
+    if(t){S.token=t;return afterLogin().catch(function(){S.token='';store.del('rp_tok');if(S.access.enabled)return afterLogin().catch(toLogin);toLogin()})}
+    if(S.access.enabled)return afterLogin().catch(toLogin);
+    toLogin()}).catch(function(e){view('<div class="card">'+empty('Gagal memuat aplikasi: '+e.message)+'</div>')})})();
 `;

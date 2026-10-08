@@ -206,6 +206,7 @@ function setupDatabase() {
   if (!ss) ss = SpreadsheetApp.create(APP_.DB_NAME);
   if (ss.getName() !== APP_.DB_NAME) ss.rename(APP_.DB_NAME);
   props.setProperty('DB_ID', ss.getId());
+  ensureAccessProps_();
   ss.setSpreadsheetTimeZone('Asia/Jakarta');
   try { ss.setSpreadsheetLocale('id_ID'); } catch (e) { /* abaikan */ }
   MEM_ = {}; MEM_.ss = ss;
@@ -343,7 +344,34 @@ function seedTransactional_() {
 
 /* ============================== 5. AUTH & LISENSI ============================== */
 function authError_() { return userError_('Sesi berakhir, silakan login kembali.', 'AUTH'); }
+/**
+ * Parameter akses publik (Script Properties; tidak bisa diubah dari browser):
+ *   PUBLIC_ACCESS   TRUE (default) = semua orang yang punya link bisa memakai app tanpa login; FALSE = wajib login
+ *   PUBLIC_ROLE     Owner (default, semua fitur) atau Admin (order, pelanggan, pembayaran, label)
+ *   PUBLIC_READONLY TRUE = pengunjung publik hanya boleh melihat/mengekspor, tidak bisa mengubah data
+ * Pengguna yang login tetap memakai peran akunnya.
+ */
+function accessConfig_() {
+  const p = PropertiesService.getScriptProperties(), role = String(p.getProperty('PUBLIC_ROLE') || '');
+  return { enabled: String(p.getProperty('PUBLIC_ACCESS') || 'TRUE').toUpperCase() !== 'FALSE',
+    role: ENUMS_.role.indexOf(role) >= 0 ? role : 'Owner',
+    readonly: String(p.getProperty('PUBLIC_READONLY') || 'FALSE').toUpperCase() === 'TRUE' };
+}
+function ensureAccessProps_() {
+  const p = PropertiesService.getScriptProperties();
+  [['PUBLIC_ACCESS', 'TRUE'], ['PUBLIC_ROLE', 'Owner'], ['PUBLIC_READONLY', 'FALSE']].forEach(x => { if (p.getProperty(x[0]) === null) p.setProperty(x[0], x[1]); });
+}
 function requireSession_(token, roles) {
+  let ctx = null;
+  try { ctx = sessionFromToken_(token); } catch (e) { if (!(e && e.code === 'AUTH')) throw e; }
+  if (!ctx) {
+    const a = accessConfig_(); if (!a.enabled) throw authError_();
+    ctx = { username: 'tamu', role: a.role, name: 'Tamu (Publik)', token: '', public: true, readonly: a.readonly };
+  }
+  if (roles && roles.indexOf(ctx.role) < 0) throw userError_('Anda tidak punya akses ke fitur ini.', 'FORBIDDEN');
+  return ctx;
+}
+function sessionFromToken_(token) {
   if (typeof token !== 'string' || token.length < 32 || token.length > 128) throw authError_();
   const cache = CacheService.getScriptCache(), raw = cache.get('sess_' + token); if (!raw) throw authError_();
   const s = JSON.parse(raw);
@@ -354,7 +382,6 @@ function requireSession_(token, roles) {
     s.role = u.role; s.name = u.full_name; s.chk = Date.now();
   }
   cache.put('sess_' + token, JSON.stringify(s), APP_.CACHE_TTL);
-  if (roles && roles.indexOf(s.role) < 0) throw userError_('Anda tidak punya akses ke fitur ini.', 'FORBIDDEN');
   return { username: s.u, role: s.role, name: s.name, token: token };
 }
 function apiLogin_(p) {
@@ -371,6 +398,7 @@ function apiLogin_(p) {
   return { token: token, user: { username: u, role: user.role, name: user.full_name } };
 }
 function apiChangePassword_(p, ctx) {
+  if (ctx.public) throw userError_('Mode publik tidak memakai akun. Login dulu untuk mengganti password.');
   const oldPw = str_(p.old_password, 'Password lama', 100, true), np = str_(p.new_password, 'Password baru', 100, true);
   if (np.length < 8) throw userError_('Password baru minimal 8 karakter.');
   if (np === 'admin123') throw userError_('Password terlalu mudah ditebak.');
@@ -422,7 +450,7 @@ function routes_() {
   return {
     'bootstrap': { pub: true, fn: apiBootstrap_ }, 'login': { pub: true, fn: apiLogin_ },
     'logout': { roles: B, fn: (p, c) => { CacheService.getScriptCache().remove('sess_' + c.token); return true; } },
-    'me': { roles: B, fn: apiMe_ }, 'changePassword': { roles: B, fn: apiChangePassword_ },
+    'me': { roles: B, fn: apiMe_ }, 'changePassword': { roles: B, mut: 1, fn: apiChangePassword_ },
     'dashboard': { roles: B, fn: apiDashboard_ },
     'orders.list': { roles: B, fn: apiOrdersList_ }, 'orders.create': { roles: B, write: 1, fn: apiOrderCreate_ },
     'orders.status': { roles: B, write: 1, fn: apiOrderStatus_ }, 'orders.awb': { roles: B, write: 1, fn: apiOrderAwb_ },
@@ -436,11 +464,11 @@ function routes_() {
     'catalog.pdf': { roles: B, fn: () => pdfB64_(catalogHtml_(), 'Katalog-Produk.pdf') },
     'reports.summary': { roles: O, fn: apiReportSummary_ }, 'report.pdf': { roles: O, fn: (p) => pdfB64_(reportHtml_(apiReportSummary_(p)), 'Laporan.pdf') },
     'export.csv': { roles: O, fn: apiExportCsv_ },
-    'settings.get': { roles: B, fn: apiSettingsGet_ }, 'settings.save': { roles: O, fn: apiSettingsSave_ },
-    'users.list': { roles: O, fn: apiUsersList_ }, 'users.save': { roles: O, fn: apiUserSave_ },
-    'license.status': { roles: B, fn: () => licenseInfo_() }, 'license.save': { roles: O, fn: apiLicenseSave_ },
-    'demo.seed': { roles: O, write: 1, fn: apiDemoSeed_ }, 'demo.reset': { roles: O, fn: apiDemoReset_ },
-    'backup.now': { roles: O, fn: (p, c) => { const r = runBackup_(); logActivity_(c.username, 'backup', r.name); return r; } },
+    'settings.get': { roles: B, fn: apiSettingsGet_ }, 'settings.save': { roles: O, mut: 1, fn: apiSettingsSave_ },
+    'users.list': { roles: O, fn: apiUsersList_ }, 'users.save': { roles: O, mut: 1, fn: apiUserSave_ },
+    'license.status': { roles: B, fn: () => licenseInfo_() }, 'license.save': { roles: O, mut: 1, fn: apiLicenseSave_ },
+    'demo.seed': { roles: O, write: 1, fn: apiDemoSeed_ }, 'demo.reset': { roles: O, mut: 1, fn: apiDemoReset_ },
+    'backup.now': { roles: O, mut: 1, fn: (p, c) => { const r = runBackup_(); logActivity_(c.username, 'backup', r.name); return r; } },
     'activity.list': { roles: O, fn: () => readAll_('Log_Activity', true).slice(-200).reverse() },
     'ai.reply': { roles: B, fn: apiAiReply_ }, 'ai.caption': { roles: B, fn: apiAiCaption_ }, 'ai.address': { roles: B, fn: apiAiAddress_ }
   };
@@ -453,6 +481,7 @@ function api(token, action, payload) {
     if (!route) throw userError_('Aksi tidak dikenal.');
     const ctx = route.pub ? null : requireSession_(token, route.roles);
     globalThis.__ctx = ctx;
+    if (ctx && ctx.public && ctx.readonly && (route.write || route.mut)) throw userError_('Mode publik hanya-baca. Login untuk mengubah data.', 'READONLY');
     if (route.write && !licenseInfo_().writable) throw userError_('Masa trial berakhir. Aktifkan lisensi di menu Lisensi.', 'LICENSE');
     return { ok: true, data: route.fn(payload && typeof payload === 'object' ? payload : {}, ctx) };
   } catch (err) {
@@ -464,7 +493,7 @@ function api(token, action, payload) {
 
 function supportWa_() { return PropertiesService.getScriptProperties().getProperty('SUPPORT_WHATSAPP') || APP_.SUPPORT_WA; }
 function apiBootstrap_() {
-  const base = { app: { name: APP_.NAME, version: APP_.VERSION, maker: APP_.MAKER, year: APP_.YEAR }, supportWa: supportWa_() };
+  const base = { app: { name: APP_.NAME, version: APP_.VERSION, maker: APP_.MAKER, year: APP_.YEAR }, supportWa: supportWa_(), access: accessConfig_() };
   try {
     const s = getSettings_(), l = licenseInfo_();
     return Object.assign(base, { business: { name: s.BUSINESS_NAME || 'Toko Saya', logo: s.LOGO_URL || '' }, license: { status: l.status, label: l.label } });
@@ -473,7 +502,7 @@ function apiBootstrap_() {
     throw e;
   }
 }
-function apiMe_(p, ctx) { return { user: { username: ctx.username, role: ctx.role, name: ctx.name }, settings: apiSettingsGet_(p, ctx), license: licenseInfo_() }; }
+function apiMe_(p, ctx) { return { user: { username: ctx.username, role: ctx.role, name: ctx.name, public: !!ctx.public }, settings: apiSettingsGet_(p, ctx), license: licenseInfo_() }; }
 
 /* ============================== 7. CRUD API ============================== */
 function parseItems_(json) {
