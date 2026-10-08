@@ -128,7 +128,7 @@ const TAMPILAN_BODY_ = String.raw`
 const TAMPILAN_JS_ = String.raw`
 var S={token:'',user:null,biz:{name:'Toko Saya',logo:''},lic:{},set:{},products:[],page:'',charts:[],app:{version:'1.0.0'},supportWa:''};
 var A={},IN={},FM={},R={};
-S.access={enabled:false,role:'Owner',readonly:false};
+S.access={enabled:false,loginEnabled:false,role:'Owner',readonly:false};
 var $=function(s,r){return (r||document).querySelector(s)};
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function rp(n){return 'Rp '+String(Math.round(Number(n)||0)).replace(/\B(?=(\d{3})+(?!\d))/g,'.')}
@@ -188,7 +188,7 @@ function go(p,arg){
   var s=$('#sn-'+p),b=$('#bn-'+p);if(s)s.classList.add('on');if(b)b.classList.add('on');
   window.scrollTo(0,0);R[p]($('#view'),arg)}
 function forceLogout(){S.token='';S.user=null;store.del('rp_tok');chrome();toast('Sesi berakhir, silakan login lagi','err');go('login')}
-A.userMenu=function(){if(isPub())return modal('Mode Publik','<p><span class="chip v">'+esc(S.user.role)+'</span> '+(S.access.readonly?'<span class="chip p">hanya-baca</span>':'<span class="chip">baca &amp; ubah</span>')+'</p><p style="color:var(--mu)">Siapa pun yang punya link bisa memakai aplikasi ini tanpa login. Ingin memakai akun sendiri?</p><div class="grid"><button class="btn pri" data-act="pubLogin">🔑 Masuk dengan akun</button><button class="btn" data-act="go" data-p="license">Lisensi</button></div>');
+A.userMenu=function(){if(isPub())return modal(S.access.loginEnabled?'Mode Publik':'Mode Demo','<p><span class="chip v">'+esc(S.user.role)+'</span> '+(S.access.readonly?'<span class="chip p">hanya-baca</span>':'<span class="chip">semua fitur aktif</span>')+'</p><p style="color:var(--mu)">'+(S.access.loginEnabled?'Siapa pun yang punya link bisa memakai aplikasi ini tanpa login. Ingin memakai akun sendiri?':'Aplikasi ini hanya untuk demo: tanpa login, semua fitur terbuka, dan data contoh bisa direset kapan saja di Pengaturan.')+'</p><div class="grid">'+(S.access.loginEnabled?'<button class="btn pri" data-act="pubLogin">🔑 Masuk dengan akun</button>':'<button class="btn pri" data-act="go" data-p="settings">♻ Pengaturan &amp; reset data demo</button>')+'<button class="btn" data-act="go" data-p="license">Lisensi</button></div>');
   modal(S.user.name,'<p><span class="chip v">'+esc(S.user.role)+'</span> @'+esc(S.user.username)+'</p><div class="grid"><button class="btn" data-act="chpw">🔒 Ganti Password</button><button class="btn" data-act="go" data-p="license">🔑 Lisensi</button><button class="btn dng" data-act="logout">🚪 Keluar</button></div>')};
 A.pubLogin=function(){closeModal();S.token='';S.user=null;S.showLogin=true;chrome();go('login')};
 A.logout=function(){closeModal();call('logout').catch(function(){}).then(function(){S.token='';S.user=null;store.del('rp_tok');chrome();if(S.access.enabled){S.showLogin=false;afterLogin().catch(fail)}else go('login')})};
@@ -197,13 +197,13 @@ A.closeModal=closeModal;
 FM.chpw=function(f){call('changePassword',fv(f)).then(function(){closeModal();toast('Password diubah','ok')}).catch(fail)};
 
 /* ---------- login ---------- */
-R.login=function(){view('<div class="card login"><div class="empty" style="padding:6px">'+empty('').replace('<p></p>','')+'</div><h2 style="text-align:center;margin:0">Masuk ke ResellerPro</h2><p style="text-align:center;color:var(--mu)">Ubah chat WhatsApp jadi pesanan & pengiriman.</p><form data-form="login"><label>Username</label><input name="username" autocomplete="username" required maxlength="40"><label>Password</label><input type="password" name="password" autocomplete="current-password" required><button class="btn pri" style="width:100%;margin-top:14px">Masuk</button></form>'+(S.access.enabled?'<p style="text-align:center"><button type="button" class="btn" data-act="pubBack">🌐 Lanjut tanpa login</button></p>':'')+(S.needSetup?'<p class="chip p" style="margin-top:12px">Database belum siap — jalankan setupDatabase() di editor Apps Script.</p>':'')+'</div>')};
+R.login=function(){if(!S.access.loginEnabled&&!S.needSetup){afterLogin().catch(fail);return}view('<div class="card login"><div class="empty" style="padding:6px">'+empty('').replace('<p></p>','')+'</div><h2 style="text-align:center;margin:0">Masuk ke ResellerPro</h2><p style="text-align:center;color:var(--mu)">Ubah chat WhatsApp jadi pesanan & pengiriman.</p><form data-form="login"><label>Username</label><input name="username" autocomplete="username" required maxlength="40"><label>Password</label><input type="password" name="password" autocomplete="current-password" required><button class="btn pri" style="width:100%;margin-top:14px">Masuk</button></form>'+(S.access.loginEnabled&&S.access.enabled?'<p style="text-align:center"><button type="button" class="btn" data-act="pubBack">🌐 Lanjut tanpa login</button></p>':'')+(S.needSetup?'<p class="chip p" style="margin-top:12px">Database belum siap — jalankan setupDatabase() di editor Apps Script.</p>':'')+'</div>')};
 A.pubBack=function(){S.showLogin=false;afterLogin().catch(fail)};
 FM.login=function(f){call('login',fv(f)).then(function(d){S.token=d.token;S.user=d.user;store.set('rp_tok',d.token);return afterLogin()}).catch(fail)};
 function afterLogin(){
   return call('me').then(function(d){S.user=d.user;S.set=d.settings;S.lic=d.license;S.biz={name:S.set.BUSINESS_NAME||S.biz.name,logo:S.set.LOGO_URL||''};chrome();return call('products.list',{},true)})
   .then(function(p){S.products=p;
-    if(isOwner()&&!S.set.SETUP_DONE)return go('wizard');
+    if(isOwner()&&!isPub()&&!S.set.SETUP_DONE)return go('wizard');
     var pg=INIT.page&&R[INIT.page]?INIT.page:'dashboard',id=INIT.id;INIT={};go(pg,id)})}
 
 /* ---------- wizard ---------- */
@@ -441,7 +441,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal()
   call('bootstrap',{},true).then(function(b){S.app=b.app;S.supportWa=b.supportWa;S.biz=b.business;S.lic=b.license;S.needSetup=!!b.needSetup;S.access=b.access||S.access;chrome();
     var t=store.get('rp_tok'),toLogin=function(){S.token='';S.user=null;store.del('rp_tok');chrome();go(INIT.page&&PUBLIC[INIT.page]?INIT.page:'login')};
     if(b.needSetup)return toLogin();
-    if(t){S.token=t;return afterLogin().catch(function(){S.token='';store.del('rp_tok');if(S.access.enabled)return afterLogin().catch(toLogin);toLogin()})}
+    if(t&&S.access.loginEnabled){S.token=t;return afterLogin().catch(function(){S.token='';store.del('rp_tok');if(S.access.enabled)return afterLogin().catch(toLogin);toLogin()})}
     if(S.access.enabled)return afterLogin().catch(toLogin);
     toLogin()}).catch(function(e){view('<div class="card">'+empty('Gagal memuat aplikasi: '+e.message)+'</div>')})})();
 `;

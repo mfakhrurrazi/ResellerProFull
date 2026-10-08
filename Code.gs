@@ -349,24 +349,29 @@ function authError_() { return userError_('Sesi berakhir, silakan login kembali.
  *   PUBLIC_ACCESS   TRUE (default) = semua orang yang punya link bisa memakai app tanpa login; FALSE = wajib login
  *   PUBLIC_ROLE     Owner (default, semua fitur) atau Admin (order, pelanggan, pembayaran, label)
  *   PUBLIC_READONLY TRUE = pengunjung publik hanya boleh melihat/mengekspor, tidak bisa mengubah data
- * Pengguna yang login tetap memakai peran akunnya.
+ *   LOGIN_ENABLED   FALSE (default, MODE DEMO) = fitur login dimatikan total: tidak ada halaman/route login,
+ *                   token lama diabaikan, semua pengunjung langsung masuk dengan PUBLIC_ROLE (PUBLIC_ACCESS diabaikan).
+ *                   TRUE = login tersedia; pengguna yang login memakai peran akunnya.
  */
 function accessConfig_() {
   const p = PropertiesService.getScriptProperties(), role = String(p.getProperty('PUBLIC_ROLE') || '');
-  return { enabled: String(p.getProperty('PUBLIC_ACCESS') || 'TRUE').toUpperCase() !== 'FALSE',
+  const loginEnabled = String(p.getProperty('LOGIN_ENABLED') || 'FALSE').toUpperCase() === 'TRUE';
+  return { loginEnabled: loginEnabled,
+    enabled: loginEnabled ? String(p.getProperty('PUBLIC_ACCESS') || 'TRUE').toUpperCase() !== 'FALSE' : true,
     role: ENUMS_.role.indexOf(role) >= 0 ? role : 'Owner',
     readonly: String(p.getProperty('PUBLIC_READONLY') || 'FALSE').toUpperCase() === 'TRUE' };
 }
 function ensureAccessProps_() {
   const p = PropertiesService.getScriptProperties();
-  [['PUBLIC_ACCESS', 'TRUE'], ['PUBLIC_ROLE', 'Owner'], ['PUBLIC_READONLY', 'FALSE']].forEach(x => { if (p.getProperty(x[0]) === null) p.setProperty(x[0], x[1]); });
+  [['LOGIN_ENABLED', 'FALSE'], ['PUBLIC_ACCESS', 'TRUE'], ['PUBLIC_ROLE', 'Owner'], ['PUBLIC_READONLY', 'FALSE']].forEach(x => { if (p.getProperty(x[0]) === null) p.setProperty(x[0], x[1]); });
 }
 function requireSession_(token, roles) {
   let ctx = null;
-  try { ctx = sessionFromToken_(token); } catch (e) { if (!(e && e.code === 'AUTH')) throw e; }
+  const a = accessConfig_();
+  if (a.loginEnabled) { try { ctx = sessionFromToken_(token); } catch (e) { if (!(e && e.code === 'AUTH')) throw e; } }
   if (!ctx) {
-    const a = accessConfig_(); if (!a.enabled) throw authError_();
-    ctx = { username: 'tamu', role: a.role, name: 'Tamu (Publik)', token: '', public: true, readonly: a.readonly };
+    if (!a.enabled) throw authError_();
+    ctx = { username: 'tamu', role: a.role, name: a.loginEnabled ? 'Tamu (Publik)' : 'Tamu (Demo)', token: '', public: true, readonly: a.readonly };
   }
   if (roles && roles.indexOf(ctx.role) < 0) throw userError_('Anda tidak punya akses ke fitur ini.', 'FORBIDDEN');
   return ctx;
@@ -385,6 +390,7 @@ function sessionFromToken_(token) {
   return { username: s.u, role: s.role, name: s.name, token: token };
 }
 function apiLogin_(p) {
+  if (!accessConfig_().loginEnabled) throw userError_('Login dinonaktifkan (mode demo). Aplikasi dapat dipakai langsung tanpa login.', 'NOLOGIN');
   const u = str_(p.username, 'Username', 40, true).toLowerCase(), pw = str_(p.password, 'Password', 100, true);
   const cache = CacheService.getScriptCache(), fk = 'fail_' + u, fails = parseInt(cache.get(fk) || '0', 10);
   if (fails >= 5) throw userError_('Terlalu banyak percobaan gagal. Coba lagi dalam 10 menit.');
